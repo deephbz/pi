@@ -995,6 +995,8 @@ export class SessionManager {
 	private byId: Map<string, SessionEntry> = new Map();
 	private labelsById: Map<string, string> = new Map();
 	private labelTimestampsById: Map<string, string> = new Map();
+	/** Latest session_info entry in file order. The footer reads the name on every frame. */
+	private latestSessionInfo: SessionInfoEntry | undefined;
 	private leafId: string | null = null;
 
 	private constructor(
@@ -1072,6 +1074,7 @@ export class SessionManager {
 		this.byId.clear();
 		this.labelsById.clear();
 		this.labelTimestampsById.clear();
+		this.latestSessionInfo = undefined;
 		this.leafId = null;
 		this.flushed = false;
 
@@ -1104,11 +1107,13 @@ export class SessionManager {
 		this.byId.clear();
 		this.labelsById.clear();
 		this.labelTimestampsById.clear();
+		this.latestSessionInfo = undefined;
 		this.leafId = null;
 		for (const entry of this.fileEntries) {
 			if (entry.type === "session") continue;
 			this.byId.set(entry.id, entry);
 			this.leafId = entry.id;
+			if (entry.type === "session_info") this.latestSessionInfo = entry;
 			if (entry.type === "label") {
 				if (entry.label) {
 					this.labelsById.set(entry.targetId, entry.label);
@@ -1190,9 +1195,11 @@ export class SessionManager {
 
 	private _appendEntry(entry: SessionEntry): void {
 		const previousLeafId = this.leafId;
+		const previousSessionInfo = this.latestSessionInfo;
 		this.fileEntries.push(entry);
 		this.byId.set(entry.id, entry);
 		this.leafId = entry.id;
+		if (entry.type === "session_info") this.latestSessionInfo = entry;
 		try {
 			this._persist(entry);
 		} catch (error) {
@@ -1201,6 +1208,7 @@ export class SessionManager {
 			this.fileEntries.pop();
 			this.byId.delete(entry.id);
 			this.leafId = previousLeafId;
+			this.latestSessionInfo = previousSessionInfo;
 			throw error;
 		}
 	}
@@ -1326,16 +1334,8 @@ export class SessionManager {
 
 	/** Get the current session name from the latest session_info entry, if any. */
 	getSessionName(): string | undefined {
-		// Walk entries in reverse to find the latest session_info entry.
-		// Empty names explicitly clear the session title. Reads fileEntries directly: the footer
-		// calls this on every frame, and getEntries() copies the whole session.
-		for (let i = this.fileEntries.length - 1; i >= 0; i--) {
-			const entry = this.fileEntries[i];
-			if (entry.type === "session_info") {
-				return entry.name?.trim() || undefined;
-			}
-		}
-		return undefined;
+		// Empty names explicitly clear the session title.
+		return this.latestSessionInfo?.name?.trim() || undefined;
 	}
 
 	/**
